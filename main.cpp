@@ -64,6 +64,7 @@ const std::vector<const char*> desiredLayers = {
 };
 
 const std::vector<const char*> deviceExtensions = {
+    //"VK_KHR_portability_subset",
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
@@ -251,8 +252,8 @@ private:
         VkDebugUtilsMessengerCreateInfoEXT createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
         createInfo.messageSeverity = 
-            // VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | 
-            // VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT | 
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | 
+            VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT | 
             VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | 
             VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
         createInfo.messageType = 

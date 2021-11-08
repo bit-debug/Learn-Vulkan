@@ -1,6 +1,8 @@
-/.vscode
+# /.vscode
 
 /CMakeFiles
 
 /build
 **/*.app
+
+**/.DS_Store
