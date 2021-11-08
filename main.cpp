@@ -68,6 +68,8 @@ const std::vector<const char*> deviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
+const uint64_t MAX_FRAMES_IN_FLIGHT = 2;
+
 void getAvailableExtensions() {
     uint32_t extensionCount = 0;
     std::vector<VkExtensionProperties> extensions;
@@ -160,8 +162,11 @@ private:
 
     VkCommandPool commandPool;
     std::vector<VkCommandBuffer> commandBuffers;
-    VkSemaphore imageAvailableSemaphore;
-    VkSemaphore renderFinishedSemaphore;
+    std::vector<VkSemaphore> imageAvailableSemaphores;
+    std::vector<VkSemaphore> renderFinishedSemaphores;
+    std::vector<VkFence> inFlightFences;
+    std::vector<VkFence> imagesInFlight;
+    size_t currentFrame = 0;
 
     void initVulkan() {
         createInstance();
@@ -177,6 +182,7 @@ private:
         createCommandPool();
         createCommandBuffers();
         createSemaphores();
+        createFences();
     }
 
     void mainLoop() {
@@ -188,8 +194,11 @@ private:
     }
 
     void cleanup() {
-        vkDestroySemaphore(device, renderFinishedSemaphore, nullptr);
-        vkDestroySemaphore(device, imageAvailableSemaphore, nullptr);
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            vkDestroyFence(device, inFlightFences[i], nullptr);
+            vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+            vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+        }
         vkDestroyCommandPool(device, commandPool, nullptr);
 
         for (auto& framebuffer : swapchainFramebuffers) {
@@ -217,7 +226,7 @@ private:
     void createInstance() {
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-        appInfo.pApplicationName = "Hello Triangle";
+        appInfo.pApplicationName = "LearnVulkan";
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.pEngineName = "No Engine";
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
@@ -801,31 +810,59 @@ private:
     }
 
     void createSemaphores() {
+        imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+        renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+
         VkSemaphoreCreateInfo semaphoreCreateInfo{};
         semaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-        vkCritical(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &imageAvailableSemaphore));
-        vkCritical(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &renderFinishedSemaphore));
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            vkCritical(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &imageAvailableSemaphores[i]));
+            vkCritical(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &renderFinishedSemaphores[i]));
+        }
+    }
+
+    void createFences() {
+        inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+        VkFenceCreateInfo fenceCreateInfo{};
+        fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            vkCritical(vkCreateFence(device, &fenceCreateInfo, nullptr, &inFlightFences[i]));
+        }
+
+        imagesInFlight.resize(swapchainImages.size(), VK_NULL_HANDLE);
     }
 
     void drawFrame() {
+        vkCritical(vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, std::numeric_limits<uint64_t>::max()));
+
         uint32_t imageIndex;
-        vkCritical(vkAcquireNextImageKHR(device, swapchain, std::numeric_limits<uint64_t>::max(), imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex));
+        vkCritical(vkAcquireNextImageKHR(device, swapchain, std::numeric_limits<uint64_t>::max(), imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex));
+
+        // check if a previous frame is using this image (i.e. there is its fence to wait on)
+        if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
+            vkCritical(vkWaitForFences(device, 1, &imagesInFlight[imageIndex], VK_TRUE, std::numeric_limits<uint64_t>::max()));
+        }
+
+        // mark the image as now being in use by this frame
+        imagesInFlight[imageIndex] = inFlightFences[currentFrame];
         
         VkSubmitInfo submitInfo{};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        VkSemaphore waitSemaphores[] = {imageAvailableSemaphore};
+        VkSemaphore waitSemaphores[] = {imageAvailableSemaphores[currentFrame]};
         VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
         submitInfo.waitSemaphoreCount = 1;
         submitInfo.pWaitSemaphores = waitSemaphores;
         submitInfo.pWaitDstStageMask = waitStages;
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &commandBuffers[imageIndex];
-        VkSemaphore signalSemaphores[] = {renderFinishedSemaphore};
+        VkSemaphore signalSemaphores[] = {renderFinishedSemaphores[currentFrame]};
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = signalSemaphores;
-        vkCritical(vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
-        
 
+        vkCritical(vkResetFences(device, 1, &inFlightFences[currentFrame]));
+        vkCritical(vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]));
+        
         VkPresentInfoKHR presentInfo{};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         presentInfo.waitSemaphoreCount = 1;
@@ -837,7 +874,10 @@ private:
         presentInfo.pResults = nullptr; // optional
 
         vkCritical(vkQueuePresentKHR(presentQueue, &presentInfo));
-        vkCritical(vkQueueWaitIdle(presentQueue));
+        // vkCritical(vkQueueWaitIdle(presentQueue));
+
+        currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+        
     }
     
 

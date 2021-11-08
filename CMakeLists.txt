@@ -31,18 +31,3 @@ target_link_libraries(main.app LINK_PUBLIC
     ${GLFW}
     ${VULKAN}
 )
-
-set(BUILD_REFERENCE ON)
-if (BUILD_REFERENCE)
-add_executable(reference.app reference.cpp)
-
-target_include_directories(reference.app PUBLIC
-    /opt/homebrew/include
-    $ENV{VK_SDK}/include
-)
-
-target_link_libraries(reference.app LINK_PUBLIC
-    ${GLFW}
-    ${VULKAN}
-)
-endif()
