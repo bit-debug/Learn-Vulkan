@@ -21,22 +21,22 @@
 #include <vector>
 #include <set>
 
+#include "main.hpp"
+
 /********************************************************************************************************************************/
 #define vkCritical(result) if (result != VK_SUCCESS) { throw std::runtime_error(std::string(__FILE__) + ":" + std::to_string(__LINE__) + ": Vulkan Failure\n"); }
 
-#define GRAY "\x1b[38;5;8m" 
-#define RED "\x1b[38;5;1m"
-#define YELLOW "\x1b[38;5;3m"
-#define BRIGHT_RED "\x1b[38;5;9m"
-#define CLEAR "\x1b[0m"
+#if defined(ENABLE_LOGGING)
+#define LOG(...) printf(BRIGHT_RED); printf(__VA_ARGS__); printf(CLEAR);
+#else
+#define LOG(...)
+#endif
 
-void printd(const char* msg) {
-    printf(RED "%s" CLEAR, msg);
-}
-
-void printe(const char* msg) {
-    printf(RED "%s" CLEAR, msg);
-}
+#if defined(ENABLE_LOGGING)
+#define DLOG(...) printf(RED); printf(__VA_ARGS__); printf(CLEAR);
+#else
+#define DLOG(...)
+#endif
 /********************************************************************************************************************************/
 
 /********************************************************************************************************************************/
@@ -59,16 +59,17 @@ struct SwapchainDetails {
     }
 };
 
-const std::vector<const char*> desiredLayers = {
-    "VK_LAYER_KHRONOS_validation"
-};
+std::vector<const char*> desiredLayers = {};
 
-const std::vector<const char*> deviceExtensions = {
-    //"VK_KHR_portability_subset",
+std::vector<const char*> deviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
 
-const uint64_t MAX_FRAMES_IN_FLIGHT = 2;
+void configVulkan() {
+    if (ENABLE_VALIDATION_LAYER) {
+        desiredLayers.emplace_back("VK_LAYER_KHRONOS_validation");
+    }
+}
 
 void getAvailableExtensions() {
     uint32_t extensionCount = 0;
@@ -119,6 +120,7 @@ class HelloTriangleApplication
 public:
     void run() {
         initWindow();
+        configVulkan();
         initVulkan();
         mainLoop();
         cleanup();
@@ -249,7 +251,10 @@ private:
         glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
         std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
-        extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+
+        if (ENABLE_DEBUG_MESSENGER) {
+            extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        }
 
         createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
         createInfo.ppEnabledExtensionNames = extensions.data();
@@ -258,6 +263,10 @@ private:
     }
 
     void setupDebugMessenger() {
+        if (!ENABLE_DEBUG_MESSENGER) {
+            return;
+        }
+
         VkDebugUtilsMessengerCreateInfoEXT createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
         createInfo.messageSeverity = 
@@ -292,7 +301,7 @@ private:
 
         }
         case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT: {
-            printf(GRAY "%s\n" CLEAR, pCallbackData->pMessage);
+            // printf(GRAY "%s\n" CLEAR, pCallbackData->pMessage);
             break;
         }
         case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT: {
@@ -311,6 +320,10 @@ private:
     }
 
     void teardownDebugMessenger() {
+        if (!ENABLE_DEBUG_MESSENGER) {
+            return;
+        }
+        
         auto vkDestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT");
         if (vkDestroyDebugUtilsMessengerEXT != nullptr) {
             vkDestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
@@ -409,9 +422,11 @@ private:
 
         VkPhysicalDeviceFeatures deviceFeatures{};
         createInfo.pEnabledFeatures = &deviceFeatures;
-        // Device validation layers are ignored by modern Vulkan implementation
-        createInfo.enabledLayerCount = static_cast<uint32_t>(deviceExtensions.size());
-        createInfo.ppEnabledLayerNames = deviceExtensions.data();
+        if (ENABLE_VALIDATION_LAYER) {
+            // Device validation layers are ignored by modern Vulkan implementation
+            createInfo.enabledLayerCount = static_cast<uint32_t>(deviceExtensions.size());
+            createInfo.ppEnabledLayerNames = deviceExtensions.data();
+        }
 
         // VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME is optionally required (beta) for Vulkan on top of native graphics library (Metal)
         // deviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
@@ -892,7 +907,7 @@ int main()
     try {
         app.run();
     } catch (const std::exception &e) {
-        printe(e.what());
+        LOG("%s", e.what());
         return EXIT_FAILURE;
     }
 
