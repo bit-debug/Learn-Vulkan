@@ -16,7 +16,7 @@
 #define ENABLE_LOGGING
 #define ENABLE_DEBUG_LOGGING
 
-const bool ENABLE_VALIDATION_LAYER = true;
+const bool ENABLE_VALIDATION_LAYER = false;
 const bool ENABLE_DEBUG_MESSENGER = true;
 
 const uint64_t MAX_FRAMES_IN_FLIGHT = 2;
