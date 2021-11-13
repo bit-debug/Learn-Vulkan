@@ -119,9 +119,9 @@ class HelloTriangleApplication
 {
 public:
     void run() {
-        initWindow();
+        setupWindow();
         configVulkan();
-        initVulkan();
+        setupVulkan();
         mainLoop();
         cleanup();
     }
@@ -131,7 +131,7 @@ private:
     const uint32_t HEIGHT = 768;
     GLFWwindow* window;
 
-    void initWindow() {
+    void setupWindow() {
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
@@ -170,9 +170,9 @@ private:
     std::vector<VkFence> imagesInFlight;
     size_t currentFrame = 0;
 
-    void initVulkan() {
+    void setupVulkan() {
         createInstance();
-        setupDebugMessenger();
+        createDebugMessenger();
         createSurface();
         selectPhysicalDevice();
         createDevice();
@@ -262,7 +262,7 @@ private:
         vkCritical(vkCreateInstance(&createInfo, nullptr, &instance));
     }
 
-    void setupDebugMessenger() {
+    void createDebugMessenger() {
         if (!ENABLE_DEBUG_MESSENGER) {
             return;
         }
@@ -446,16 +446,18 @@ private:
 
         uint32_t i = 0;
         for (const auto& queueFamily : queueFamilies) {
-            if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            if (!indices->graphicsFamily.has_value() && (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
                 indices->graphicsFamily = i;
             }
 
-            VkBool32 presentSupport = false; 
-            vkCritical(vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport));
-            if (presentSupport) {
-                indices->presentFamily = i;
+            if (!indices->presentFamily.has_value()) {
+                VkBool32 presentSupport = false;
+                vkCritical(vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport));
+                if (presentSupport) {
+                    indices->presentFamily = i;
+                }
             }
-
+            
             if (indices->isComplete()) {
                 break;
             }

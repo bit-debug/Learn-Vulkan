@@ -1,9 +1,11 @@
 #!/bin/bash
 
+
 BRIGHT_RED="\x1b[38;5;9m"
 CLEAR="\x1b[0m"
 
 cd build
+rm -r *
 
 printf "${BRIGHT_RED}Compiling vertex shader......\n${CLEAR}"
 glslc -fshader-stage=vertex ../shaders/main.vs -o vertex.spv
