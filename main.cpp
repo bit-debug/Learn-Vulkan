@@ -146,9 +146,16 @@ private:
     void setupWindow() {
         glfwInit();
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
         window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+        glfwSetWindowUserPointer(window, this);
+        glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+    }
+
+    static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
+        auto app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+        app->framebufferResized = true;
     }
 
     VkInstance instance;
@@ -182,6 +189,8 @@ private:
     std::vector<VkFence> imagesInFlight;
     size_t currentFrame = 0;
 
+    bool framebufferResized = false;
+
     void setupVulkan() {
         createInstance();
         createDebugMessenger();
@@ -199,10 +208,45 @@ private:
         createFences();
     }
 
+    void refreshSwapchain() {
+        int width = 0, height = 0;
+        // glfwGetFramebufferSize(window, &width, &height);
+        // ToDo: should avoid free spinning
+        while (width == 0 || height == 0) {
+            glfwGetFramebufferSize(window, &width, &height);
+            glfwWaitEvents();
+        }
+
+        vkDeviceWaitIdle(device);
+
+        // cleanup before recreating new objects
+        for (auto& framebuffer : swapchainFramebuffers) {
+            vkDestroyFramebuffer(device, framebuffer, nullptr);
+        }
+        vkFreeCommandBuffers(device, commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
+        
+        vkDestroyPipeline(device, graphicsPipeline, nullptr);
+        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+        vkDestroyRenderPass(device, renderPass, nullptr);
+
+        for (size_t i = 0; i < swapchainImageViews.size(); i++) {
+            vkDestroyImageView(device, swapchainImageViews[i], nullptr);
+            vkDestroySwapchainKHR(device, swapchain, nullptr);
+        }
+
+        // recreate swapchain and related objects
+        createSwapchain();
+        createImageViews();
+        createRenderPass();
+        createGraphicsPipeline();
+        createFramebuffers();
+        createCommandBuffers();
+    }
+
     void mainLoop() {
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents();
-            drawFrame();
+            renderFrame();
         }
         vkDeviceWaitIdle(device);
     }
@@ -288,7 +332,7 @@ private:
         vkCritical(vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr));
         extensions.resize(extensionCount);
         vkCritical(vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, extensions.data()));
-        LOG("Available Vulkan Instance Extensions\n");
+        LOG("Available Vulkan Instance Extensions:\n");
         for (const auto& extension : extensions) {
             LOG(WHITE "\t%s\n" CLEAR, extension.extensionName);
         }
@@ -391,7 +435,7 @@ private:
 
         VkPhysicalDeviceProperties deviceProperties;
         vkGetPhysicalDeviceProperties(device, &deviceProperties);
-        LOG("Evaluating Device: %s\n", deviceProperties.deviceName)
+        LOG("Evaluating Device %s:\n", deviceProperties.deviceName)
         LOG(WHITE "\tType: %d\n\tAPI: %u\n\tDriver: %u\n" CLEAR, deviceProperties.deviceType, deviceProperties.apiVersion, deviceProperties.driverVersion);
 
         VkPhysicalDeviceFeatures deviceFeatures;
@@ -469,6 +513,8 @@ private:
     }
 
     void createSwapchain() {
+        swapchainDetails.getSwapchainDetails(physicalDevice, surface);
+
         VkSurfaceFormatKHR surfaceFormat = selectSurfaceFormat(swapchainDetails.formats);
         VkPresentModeKHR presentMode = selectPresentMode(swapchainDetails.presentModes);
         VkExtent2D extent = selectSwapchainExtent(swapchainDetails.capabilities);
@@ -538,9 +584,12 @@ private:
 
     VkExtent2D selectSwapchainExtent(const VkSurfaceCapabilitiesKHR& capabilities) {
         if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max() && capabilities.currentExtent.height != std::numeric_limits<uint32_t>::max()) { 
+            LOG("Current Swapchain Extent: (%d x %d)\n", capabilities.currentExtent.width, capabilities.currentExtent.height);
             return capabilities.currentExtent;
         } else {
-            VkExtent2D actualExtent = {WIDTH, HEIGHT};
+            int width, height;
+            glfwGetFramebufferSize(window, &width, &height);
+            VkExtent2D actualExtent = {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};
             actualExtent.width = std::max(capabilities.minImageExtent.width, std::min(capabilities.maxImageExtent.width, actualExtent.width));
             actualExtent.height = std::max(capabilities.minImageExtent.height, std::min(capabilities.maxImageExtent.height, actualExtent.height));
             return actualExtent;
@@ -840,11 +889,27 @@ private:
         imagesInFlight.resize(swapchainImages.size(), VK_NULL_HANDLE);
     }
 
-    void drawFrame() {
+    void renderFrame() {
+        static uint64_t frameCount = 0;
+        if (frameCount++ % 90 == 0) {
+            LOG(WHITE "Render Frame-%05llu\n" CLEAR, frameCount);
+        }
+
+        VkResult result;
+
         vkCritical(vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, std::numeric_limits<uint64_t>::max()));
 
         uint32_t imageIndex;
-        vkCritical(vkAcquireNextImageKHR(device, swapchain, std::numeric_limits<uint64_t>::max(), imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex));
+        result = vkAcquireNextImageKHR(device, swapchain, std::numeric_limits<uint64_t>::max(), imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+            LOG("Swapchain Out Of Date\n");        
+            refreshSwapchain();
+            framebufferResized = false;
+            return;
+        }
+        if (result != VK_SUCCESS) {
+            throw std::runtime_error("Failed to acquire the swapchain image!");
+        } 
 
         // check if a previous frame is using this image (i.e. there is its fence to wait on)
         if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
@@ -880,7 +945,17 @@ private:
         presentInfo.pImageIndices = &imageIndex;
         presentInfo.pResults = nullptr; // optional
 
-        vkCritical(vkQueuePresentKHR(presentQueue, &presentInfo));
+        // vkCritical(vkQueuePresentKHR(presentQueue, &presentInfo));
+        result = vkQueuePresentKHR(presentQueue, &presentInfo);
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
+            refreshSwapchain();
+            framebufferResized = false;
+            return;
+        }
+        if (result != VK_SUCCESS) {
+            throw std::runtime_error("Failed to present the swapchain image");
+        }
+
         // vkCritical(vkQueueWaitIdle(presentQueue));
 
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
