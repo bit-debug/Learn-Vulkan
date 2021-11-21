@@ -19,7 +19,10 @@
 
 #include <algorithm>
 #include <vector>
+#include <array>
 #include <set>
+
+#include <glm/glm.hpp>
 
 #include "main.hpp"
 
@@ -56,6 +59,7 @@ struct QueueFamilyIndices {
 
         uint32_t i = 0;
         for (const auto& queueFamily : queueFamilies) {
+            // VK_QUEUE_GRAPHICS_BIT implicitly the support of VK_QUEUE_TRANSFER_BIT
             if (!this->graphicsFamily.has_value() && (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
                 this->graphicsFamily = i;
             }
@@ -111,7 +115,7 @@ std::vector<const char*> deviceExtensions = {};
 void readFileAsByteArray(const std::string& filepath, std::vector<int8_t>& buffer) {
     std::ifstream ifs(filepath, std::ios::ate | std::ios::binary);
     if (!ifs.is_open()) {
-        throw std::runtime_error("Failed to open the file");
+        throw std::runtime_error("Failed to open the file.\n");
     }
 
     size_t filesize = (size_t) ifs.tellg();
@@ -120,7 +124,7 @@ void readFileAsByteArray(const std::string& filepath, std::vector<int8_t>& buffe
     ifs.read(reinterpret_cast<char*>(buffer.data()), filesize);
 
     if (ifs.fail()) {
-        throw std::runtime_error("Failed to read the file");
+        throw std::runtime_error("Failed to read the file.\n");
     }
     ifs.close();
 }
@@ -142,6 +146,41 @@ private:
     const uint32_t WIDTH = 1024;
     const uint32_t HEIGHT = 768;
     GLFWwindow* window;
+
+    struct Vertex {
+        glm::vec2 position;
+        glm::vec3 color;
+
+        static VkVertexInputBindingDescription getBindingDescription() {
+            VkVertexInputBindingDescription bindingDescription;
+            bindingDescription.binding = 0;
+            bindingDescription.stride = sizeof(Vertex);
+            bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+            // copy return
+            return bindingDescription;
+        }
+
+        static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
+            std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions;
+            attributeDescriptions[0].binding = 0;
+            attributeDescriptions[0].location = 0;
+            attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+            attributeDescriptions[0].offset = offsetof(Vertex, position);
+
+            attributeDescriptions[1].binding = 0;
+            attributeDescriptions[1].location = 1;
+            attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attributeDescriptions[1].offset = offsetof(Vertex, color);
+            // copy return
+            return attributeDescriptions;
+        }
+    };
+
+    const std::vector<Vertex> vertices = {
+        {{0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
+        {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+        {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+    };
 
     void setupWindow() {
         glfwInit();
@@ -180,7 +219,10 @@ private:
     VkPipelineLayout pipelineLayout;
     VkPipeline graphicsPipeline;
     std::vector<VkFramebuffer> swapchainFramebuffers;
-
+    
+    VkBuffer vertexBuffer;
+    VkDeviceMemory vertexBufferMemory;
+        
     VkCommandPool commandPool;
     std::vector<VkCommandBuffer> commandBuffers;
     std::vector<VkSemaphore> imageAvailableSemaphores;
@@ -203,6 +245,7 @@ private:
         createGraphicsPipeline();
         createFramebuffers();
         createCommandPool();
+        createVertexBuffer();
         createCommandBuffers();
         createSemaphores();
         createFences();
@@ -272,6 +315,10 @@ private:
         }
 
         vkDestroySwapchainKHR(device, swapchain, nullptr);
+
+        vkDestroyBuffer(device, vertexBuffer, nullptr);
+        vkFreeMemory(device, vertexBufferMemory, nullptr);
+
         vkDestroyDevice(device, nullptr);
         teardownDebugMessenger();
         vkDestroySurfaceKHR(instance, surface, nullptr);
@@ -686,11 +733,13 @@ private:
 
         // following are fixed (non-programmable) stages, still we need to create them explicitly
         VkPipelineVertexInputStateCreateInfo vertexInputStageCreateInfo{};
+        auto bindingDescription = Vertex::getBindingDescription();
+        auto attributeDescriptions = Vertex::getAttributeDescriptions();
         vertexInputStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        vertexInputStageCreateInfo.vertexBindingDescriptionCount = 0;
-        vertexInputStageCreateInfo.pVertexBindingDescriptions = nullptr; // optional
-        vertexInputStageCreateInfo.vertexAttributeDescriptionCount = 0;
-        vertexInputStageCreateInfo.pVertexAttributeDescriptions = nullptr; // optional
+        vertexInputStageCreateInfo.vertexBindingDescriptionCount = 1;
+        vertexInputStageCreateInfo.pVertexBindingDescriptions = &bindingDescription;
+        vertexInputStageCreateInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+        vertexInputStageCreateInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
         VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo{};
         inputAssemblyStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -829,6 +878,118 @@ private:
         vkCritical(vkCreateCommandPool(device, &createInfo, nullptr, &commandPool));
     }
 
+    void createVertexBuffer() {
+        #if 0
+        VkBufferCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        createInfo.size = sizeof(Vertex) * vertices.size();
+        createInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        createInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        vkCritical(vkCreateBuffer(device, &createInfo, nullptr, &vertexBuffer));
+
+        VkMemoryRequirements memoryRequirements;
+        vkGetBufferMemoryRequirements(device, vertexBuffer, &memoryRequirements);
+
+        VkMemoryAllocateInfo allocateInfo{};
+        allocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocateInfo.allocationSize = memoryRequirements.size;
+        allocateInfo.memoryTypeIndex = selectMemoryType(memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        vkCritical(vkAllocateMemory(device, &allocateInfo, nullptr, &vertexBufferMemory));
+
+        vkBindBufferMemory(device, vertexBuffer, vertexBufferMemory, 0);
+
+        void* data;
+        vkMapMemory(device, vertexBufferMemory, 0, createInfo.size, 0, &data);
+        memcpy(data, vertices.data(), (size_t) createInfo.size);
+        vkUnmapMemory(device, vertexBufferMemory);
+        #endif
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        VkDeviceSize bufferSize = sizeof(Vertex) * vertices.size();
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+        
+        void* data;
+        vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, vertices.data(), (size_t) bufferSize);
+        vkUnmapMemory(device, stagingBufferMemory);
+        
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory);
+
+        copyBuffer(stagingBuffer, vertexBuffer, bufferSize);
+        
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        vkFreeMemory(device, stagingBufferMemory, nullptr);
+    }
+
+    void createBuffer(VkDeviceSize size, VkBufferUsageFlags bufferUsageFlags, VkMemoryPropertyFlags memoryPropertyFlags, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
+        //LOG("Max Memory Allocation Count: %u", maxMemoryAllocationCount);
+
+        VkBufferCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        createInfo.size = size;
+        createInfo.usage = bufferUsageFlags;
+        createInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        vkCritical(vkCreateBuffer(device, &createInfo, nullptr, &buffer));
+
+        VkMemoryRequirements memoryRequirements;
+        vkGetBufferMemoryRequirements(device, buffer, &memoryRequirements);
+
+        VkMemoryAllocateInfo allocateInfo{};
+        allocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocateInfo.allocationSize = memoryRequirements.size;
+        allocateInfo.memoryTypeIndex = selectMemoryType(memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        vkCritical(vkAllocateMemory(device, &allocateInfo, nullptr, &bufferMemory));
+
+        vkCritical(vkBindBufferMemory(device, buffer, bufferMemory, 0));
+    }
+
+    void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
+        VkCommandBuffer commandBuffer;
+        VkCommandBufferAllocateInfo allocateInfo{};
+        allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocateInfo.commandPool = commandPool;
+        allocateInfo.commandBufferCount = 1;
+        vkCritical(vkAllocateCommandBuffers(device, &allocateInfo, &commandBuffer));
+
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+        VkBufferCopy copyRegion{};
+        copyRegion.srcOffset = 0; // Optional
+        copyRegion.dstOffset = 0; // Optional
+        copyRegion.size = size;
+        vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+        vkEndCommandBuffer(commandBuffer);
+
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+        vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+        
+        vkQueueWaitIdle(graphicsQueue);
+
+        vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+    }
+
+    uint32_t selectMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags flags) {
+        VkPhysicalDeviceMemoryProperties memoryProperties;
+        vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
+
+        for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++) {
+            if (typeFilter & (1 << i) && (memoryProperties.memoryTypes[i].propertyFlags & flags) == flags) {
+                return i;
+            }
+        }
+
+        throw std::runtime_error("Failed to find suitable memory type!\n");
+    }
+
     void createCommandBuffers() {
         commandBuffers.resize(swapchainFramebuffers.size());
         VkCommandBufferAllocateInfo allocateInfo{};
@@ -858,7 +1019,10 @@ private:
             // vk commands are predefined here
             vkCmdBeginRenderPass(commandBuffers[i], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
             vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-            vkCmdDraw(commandBuffers[i], 3, 1, 0, 0);
+            VkBuffer vertexBuffers[] = {vertexBuffer};
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets);
+            vkCmdDraw(commandBuffers[i], static_cast<uint32_t>(vertices.size()), 1, 0, 0);
             vkCmdEndRenderPass(commandBuffers[i]);
             
             vkCritical(vkEndCommandBuffer(commandBuffers[i]));
@@ -892,7 +1056,7 @@ private:
     void renderFrame() {
         static uint64_t frameCount = 0;
         if (frameCount++ % 90 == 0) {
-            LOG(WHITE "Render Frame-%05llu\n" CLEAR, frameCount);
+            LOG(WHITE "Render Frame-%05llu\n" CLEAR, frameCount-1);
         }
 
         VkResult result;
@@ -908,7 +1072,7 @@ private:
             return;
         }
         if (result != VK_SUCCESS) {
-            throw std::runtime_error("Failed to acquire the swapchain image!");
+            throw std::runtime_error("Failed to acquire the swapchain image!\n");
         } 
 
         // check if a previous frame is using this image (i.e. there is its fence to wait on)
@@ -953,7 +1117,7 @@ private:
             return;
         }
         if (result != VK_SUCCESS) {
-            throw std::runtime_error("Failed to present the swapchain image");
+            throw std::runtime_error("Failed to present the swapchain image.\n");
         }
 
         // vkCritical(vkQueueWaitIdle(presentQueue));
