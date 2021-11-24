@@ -28,7 +28,6 @@
 #include <array>
 #include <set>
 
-
 #include "main.hpp"
 
 /********************************************************************************************************************************/
@@ -313,10 +312,12 @@ private:
 
         vkDeviceWaitIdle(device);
 
+        #if 0
         // cleanup before recreating new objects
         for (auto& framebuffer : swapchainFramebuffers) {
             vkDestroyFramebuffer(device, framebuffer, nullptr);
         }
+
         vkFreeCommandBuffers(device, commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
         
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
@@ -332,7 +333,11 @@ private:
             vkDestroyBuffer(device, uniformBuffers[i], nullptr);
             vkFreeMemory(device, memoryUniformBuffers[i], nullptr);
         }
+
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+        #endif
+
+        cleanupSwapchainRelated();
 
         // recreate swapchain and related objects
         createSwapchain();
@@ -346,14 +351,33 @@ private:
         createCommandBuffers();
     }
 
-    void cleanup() {
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            vkDestroyFence(device, inFlightFences[i], nullptr);
-            vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
-            vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+    void cleanupSwapchainRelated() {
+        for (auto& framebuffer : swapchainFramebuffers) {
+            vkDestroyFramebuffer(device, framebuffer, nullptr);
         }
-        vkDestroyCommandPool(device, commandPool, nullptr);
 
+        vkFreeCommandBuffers(device, commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
+        
+        vkDestroyPipeline(device, graphicsPipeline, nullptr);
+        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+        vkDestroyRenderPass(device, renderPass, nullptr);
+
+        for (size_t i = 0; i < swapchainImageViews.size(); i++) {
+            vkDestroyImageView(device, swapchainImageViews[i], nullptr);
+        }
+
+        vkDestroySwapchainKHR(device, swapchain, nullptr);
+        
+        for (size_t i = 0; i < swapchainImages.size(); i++) {
+            vkDestroyBuffer(device, uniformBuffers[i], nullptr);
+            vkFreeMemory(device, memoryUniformBuffers[i], nullptr);
+        }
+
+        vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+    }
+
+    void cleanup() {
+        #if 0
         for (auto& framebuffer : swapchainFramebuffers) {
             vkDestroyFramebuffer(device, framebuffer, nullptr);
         }
@@ -367,17 +391,31 @@ private:
         }
 
         vkDestroySwapchainKHR(device, swapchain, nullptr);
+        
         for (size_t i = 0; i < swapchainImages.size(); i++) {
             vkDestroyBuffer(device, uniformBuffers[i], nullptr);
             vkFreeMemory(device, memoryUniformBuffers[i], nullptr);
         }
+        
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+        #endif
+        
+        cleanupSwapchainRelated();
+
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
         vkDestroyBuffer(device, indexBuffer, nullptr);
         vkFreeMemory(device, memoryIndexBuffer, nullptr);
         vkDestroyBuffer(device, vertexBuffer, nullptr);
         vkFreeMemory(device, memoryVertexBuffer, nullptr);
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            vkDestroyFence(device, inFlightFences[i], nullptr);
+            vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+            vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+        }
+
+        vkDestroyCommandPool(device, commandPool, nullptr);
 
         vkDestroyDevice(device, nullptr);
         teardownDebugMessenger();
@@ -1021,10 +1059,10 @@ private:
     void updateUniformBuffer(uint32_t currentImage) {
         static auto startTime = std::chrono::high_resolution_clock::now();
         auto currentTime = std::chrono::high_resolution_clock::now();
-        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+        float timeElapsed = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
 
         UniformBufferObject ubo{};
-        ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.model = glm::rotate(glm::mat4(1.0f), timeElapsed * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.projection = glm::perspective(glm::radians(45.0f), swapchainImageExtent.width / (float) swapchainImageExtent.height, 0.1f, 10.0f);
         ubo.projection[1][1] *= -1;
@@ -1077,9 +1115,7 @@ private:
             descriptorSetWrite.pImageInfo = nullptr; // Optional
             descriptorSetWrite.pTexelBufferView = nullptr; // Optional
             vkUpdateDescriptorSets(device, 1, &descriptorSetWrite, 0, nullptr);
-        }
-
-        
+        } 
     }
 
     void createBuffer(VkDeviceSize size, VkBufferUsageFlags bufferUsageFlags, VkMemoryPropertyFlags memoryPropertyFlags, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
