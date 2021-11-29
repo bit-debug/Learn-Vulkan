@@ -15,8 +15,8 @@ layout(location = 0) out vec3 outColor;
 layout(location = 1) out vec2 outTexturePosition;
 
 void main() {
-    // gl_Position = vec4(inVertexPosition, 0.0, 1.0);
-    gl_Position = ubo.projection * ubo.view * ubo.model * vec4(inVertexPosition, 0.0, 1.0);
+    gl_Position = vec4(inVertexPosition, 0.0, 1.0);
+    // gl_Position = ubo.projection * ubo.view * ubo.model * vec4(inVertexPosition, 0.0, 1.0);
     outColor = inVertexColor;
     outTexturePosition = inTexturePosition;
 }
